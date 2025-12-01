@@ -2,6 +2,7 @@
 
 ## Basic
 
+- DarkNet-19
 - 框
   - anchor: 预选框，从聚类中来
   - gt: 真实框

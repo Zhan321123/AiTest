@@ -1,34 +1,14 @@
 import torch
+import torch.nn as nn
 
-t1 = torch.tensor([[1, 2, 3], [4, 5, 6], [7, 8, 10]])
-t2 = t1 + 2
+# 定义Conv2d层（out_channels=1，其他参数按题目设置）
+conv = nn.Conv2d(in_channels=1, out_channels=1, kernel_size=2, stride=2)
 
-print(t1)
-print(t2)
+# 构造输入：shape=(N, C, H, W) = (1, 1, 5, 5)（批量1，通道1，5×5）
+x = torch.randn(1, 1, 5, 5)
 
-print("----------")
-print(t1.shape)
-print(t1.dtype)
-print(t1.device)
-print(t1.requires_grad)
-print(t1.grad_fn)
-print(t1.is_leaf)
-print(t1.is_cuda)
-print(t1.is_sparse)
+# 前向传播
+output = conv(x)
 
-print('----------')
-print(t1.size())
-print(t1.size(0))
-print(t1.numel())
-print(t1.is_contiguous())
-print(t1.is_pinned())
-
-print('-------')
-print(torch.numel(t1))
-
-print('---------')
-print(t1 @ t1)
-print(torch.matmul(t1, t1))
-print(torch.mm(t1, t1))
-print(t1.matmul(t1))
-print(t1.mm(t1))
+# 输出shape：(1, 1, 2, 2)
+print("输出shape:", output.shape)  # 打印结果：torch.Size([1, 1, 2, 2])

@@ -33,14 +33,14 @@ class Passthrough(nn.Module):
     return x
 
 
-class Yolov2(nn.Module):
+class DarkNet19(nn.Module):
   """
   input: 3*416*416
   output: 125*13*13
   """
 
   def __init__(self):
-    super(Yolov2, self).__init__()
+    super(DarkNet19, self).__init__()
     self.block1 = nn.Sequential(
       Convolutional(3, 32),
       nn.MaxPool2d(kernel_size=2, stride=2),
@@ -112,5 +112,5 @@ class Yolov2(nn.Module):
 
 if __name__ == '__main__':
   device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-  model = Yolov2().to(device)
+  model = DarkNet19().to(device)
   summary(model, (3, 416, 416))
