@@ -19,11 +19,15 @@
 
 ## Process
 
-- $input=$
+- $input=3*416*416$
 - middle precess
+  - convolutional
+    ```python
+    Conv2d(inChannel, outChannel)
+    BatchNorm(outChannel)
+    LeakyReLU(0.1)
+    ```
   - Conv2d
-  - BatchNorm
-  - leakyReLU
   - MaxPool2d
   - Path Through
 
@@ -35,6 +39,7 @@
     - tw,th: 边界框宽高相对于 Anchor 的缩放系数($w=w_{anchor}e^{tw},w\in(0,1)$，相对于图像)
     - conf: 置信度confidence
     - $N_{anchor}$: anchor的个数，yolov2中=5，实际可=9
+- 结果认定，同Yolov1
 
 ## Loss
 

@@ -27,6 +27,9 @@
     &=([x,y,w,h,conf]+[x,y,w,h,conf]+[class_1,class_2,...,class_{20}])\times 7\times 7 \\
   \end{align*}
   $$
+- 结果认定
+  - 设定置信度阈值=0.5，小于置信度的筛掉
+  - 设定IOU阈值=0.5，当同一种类别的IOU大于阈值选择置信度最大的一个
 
 ## Loss
 
