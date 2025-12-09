@@ -3,12 +3,11 @@ from torch import nn
 from torchsummary import summary
 
 
-class ConvBatchNormSilu(nn.Module):
-  """
-  Conv + BatchNorm + SiLU
-  不下采样
-  """
+def makeDivisible(x, divisor=8):
+  return int(((x + divisor - 1) // divisor) * divisor)
 
+
+class ConvBatchNormSilu(nn.Module):
   def __init__(self, inChannels, outChannels, kernelSize, stride, padding):
     super(ConvBatchNormSilu, self).__init__()
     self.conv = nn.Conv2d(inChannels, outChannels, kernel_size=kernelSize, stride=stride, padding=padding)
@@ -38,11 +37,11 @@ class ResUnit(nn.Module):
 
 
 class Cxxx(nn.Module):
-  def __init__(self, inChannels, outChannels, resAdd: bool):
+  def __init__(self, inChannels, outChannels, resAdd: bool, numRes: int):
     super(Cxxx, self).__init__()
     middleChannels = outChannels // 2
     self.cbs1 = ConvBatchNormSilu(inChannels, middleChannels, kernelSize=1, stride=1, padding=0)
-    self.res = ResUnit(middleChannels, resAdd)
+    self.res = nn.Sequential(*[ResUnit(middleChannels, resAdd) for _ in range(numRes)])
     self.cbs2 = ConvBatchNormSilu(inChannels, middleChannels, kernelSize=1, stride=1, padding=0)
     self.cbs3 = ConvBatchNormSilu(outChannels, outChannels, kernelSize=1, stride=1, padding=0)
 
@@ -56,13 +55,13 @@ class Cxxx(nn.Module):
 
 
 class SPPF(nn.Module):
-  def __init__(self):
+  def __init__(self, inChannels, midChannels, outChannels):
     super(SPPF, self).__init__()
-    self.cbs1 = ConvBatchNormSilu(1024, 512, kernelSize=3, stride=1, padding=1)
+    self.cbs1 = ConvBatchNormSilu(inChannels, midChannels, kernelSize=3, stride=1, padding=1)
     self.pool1 = nn.MaxPool2d(kernel_size=5, stride=1, padding=2)
     self.pool2 = nn.MaxPool2d(kernel_size=5, stride=1, padding=2)
     self.pool3 = nn.MaxPool2d(kernel_size=5, stride=1, padding=2)
-    self.cbs2 = ConvBatchNormSilu(2048, 1024, kernelSize=1, stride=1, padding=0)
+    self.cbs2 = ConvBatchNormSilu(midChannels * 4, outChannels, kernelSize=1, stride=1, padding=0)
 
   def forward(self, x):
     x = self.cbs1(x)
@@ -75,38 +74,62 @@ class SPPF(nn.Module):
 
 
 class Yolov5(nn.Module):
-  """
-  input: 608*608*3
-  """
-
-  def __init__(self):
+  def __init__(self, depthMultiple=1.0, widthMultiple=1.0):
     super(Yolov5, self).__init__()
+    baseChannel = {
+      'cns1_out': 64, 'cns2_out': 128, 'c313_1_out': 128,
+      'cbs4_out': 256, 'c316_out': 256, 'cbs5_out': 512,
+      'c319_out': 512, 'cbs6_out': 1024, 'c313_2_out': 1024,
+      'sppf_mid': 512, 'cbs8_out': 512, 'c323_out': 512,
+      'cbs2to1_out': 256, 'c323_1_out': 256, 'cbs1to2_out': 256,
+      'c323_2_out': 512, 'cbs2to3_out': 512, 'c323_3_out': 512
+    }
+    scaledChannel = {k: makeDivisible(v * widthMultiple, 8) for k, v in baseChannel.items()}
+
+    def scaleDepth(num):
+      return max(round(num * depthMultiple), 1)
+
     # backbone
-    self.cns1 = ConvBatchNormSilu(3, 64, kernelSize=6, stride=2, padding=2)
-    self.cns2 = ConvBatchNormSilu(64, 128, kernelSize=3, stride=2, padding=1)
-    self.c313_1 = Cxxx(128, 128, True)
-    self.cbs4 = ConvBatchNormSilu(128, 256, kernelSize=3, stride=2, padding=1)
-    self.c316 = Cxxx(256, 256, True)
-    self.cbs5 = ConvBatchNormSilu(256, 512, kernelSize=3, stride=2, padding=1)
-    self.c319 = Cxxx(512, 512, True)
-    self.cbs6 = ConvBatchNormSilu(512, 1024, kernelSize=3, stride=2, padding=1)
-    self.c313_2 = Cxxx(1024, 1024, True)
-    self.sppf = SPPF()
-    self.cbs8 = ConvBatchNormSilu(1024, 512, kernelSize=1, stride=1, padding=0)
+    self.cns1 = ConvBatchNormSilu(3, scaledChannel['cns1_out'], kernelSize=6, stride=2, padding=2)
+    self.cns2 = ConvBatchNormSilu(scaledChannel['cns1_out'], scaledChannel['cns2_out'], kernelSize=3, stride=2,
+      padding=1)
+    self.c313_1 = Cxxx(scaledChannel['cns2_out'], scaledChannel['c313_1_out'], True, scaleDepth(3))
+    self.cbs4 = ConvBatchNormSilu(scaledChannel['c313_1_out'], scaledChannel['cbs4_out'], kernelSize=3, stride=2,
+      padding=1)
+    self.c316 = Cxxx(scaledChannel['cbs4_out'], scaledChannel['c316_out'], True, scaleDepth(6))
+    self.cbs5 = ConvBatchNormSilu(scaledChannel['c316_out'], scaledChannel['cbs5_out'], kernelSize=3, stride=2,
+      padding=1)
+    self.c319 = Cxxx(scaledChannel['cbs5_out'], scaledChannel['c319_out'], True, scaleDepth(9))
+    self.cbs6 = ConvBatchNormSilu(scaledChannel['c319_out'], scaledChannel['cbs6_out'], kernelSize=3, stride=2,
+      padding=1)
+    self.c313_2 = Cxxx(scaledChannel['cbs6_out'], scaledChannel['c313_2_out'], True, scaleDepth(3))
+    # SPPF传入缩放后的通道数（不再硬编码）
+    self.sppf = SPPF(scaledChannel['c313_2_out'], scaledChannel['sppf_mid'], scaledChannel['c313_2_out'])
+    self.cbs8 = ConvBatchNormSilu(scaledChannel['c313_2_out'], scaledChannel['cbs8_out'], kernelSize=1, stride=1,
+      padding=0)
 
     # neck
     self.us3 = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False)
-    self.c323 = Cxxx(1024, 512, False)
-    self.cbs2to1 = ConvBatchNormSilu(512, 256, kernelSize=1, stride=1, padding=0)
+    # 拼接后通道数 = 上采样通道 + 骨干网络对应层通道
+    self.c323 = Cxxx(scaledChannel['cbs8_out'] + scaledChannel['c319_out'], scaledChannel['c323_out'], False,
+      scaleDepth(3))
+    self.cbs2to1 = ConvBatchNormSilu(scaledChannel['c323_out'], scaledChannel['cbs2to1_out'], kernelSize=1, stride=1,
+      padding=0)
     self.us2 = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False)
-    self.c323_1 = Cxxx(512, 256, False)
-    self.cbs1to2 = ConvBatchNormSilu(256, 256, kernelSize=3, stride=2, padding=1)
-    self.cbsOut1 = ConvBatchNormSilu(256, 255, kernelSize=1, stride=1, padding=0)
-    self.c323_2 = Cxxx(512, 512, False)
-    self.cbsOut2 = ConvBatchNormSilu(512, 255, kernelSize=1, stride=1, padding=0)
-    self.cbs2to3 = ConvBatchNormSilu(512, 512, kernelSize=3, stride=2, padding=1)
-    self.c323_3 = Cxxx(1024, 512, False)
-    self.cbsOut3 = ConvBatchNormSilu(512, 255, kernelSize=1, stride=1, padding=0)
+    self.c323_1 = Cxxx(scaledChannel['cbs2to1_out'] + scaledChannel['c316_out'], scaledChannel['c323_1_out'], False,
+      scaleDepth(3))
+    self.cbs1to2 = ConvBatchNormSilu(scaledChannel['c323_1_out'], scaledChannel['cbs1to2_out'], kernelSize=3, stride=2,
+      padding=1)
+    self.cbsOut1 = ConvBatchNormSilu(scaledChannel['c323_1_out'], 255, kernelSize=1, stride=1,
+      padding=0)  # 输出通道255固定（80类+坐标+置信）
+    self.c323_2 = Cxxx(scaledChannel['cbs1to2_out'] + scaledChannel['cbs2to1_out'], scaledChannel['c323_2_out'], False,
+      scaleDepth(3))
+    self.cbsOut2 = ConvBatchNormSilu(scaledChannel['c323_2_out'], 255, kernelSize=1, stride=1, padding=0)
+    self.cbs2to3 = ConvBatchNormSilu(scaledChannel['c323_2_out'], scaledChannel['cbs2to3_out'], kernelSize=3, stride=2,
+      padding=1)
+    self.c323_3 = Cxxx(scaledChannel['cbs2to3_out'] + scaledChannel['cbs8_out'], scaledChannel['c323_3_out'], False,
+      scaleDepth(3))
+    self.cbsOut3 = ConvBatchNormSilu(scaledChannel['c323_3_out'], 255, kernelSize=1, stride=1, padding=0)
 
   def forward(self, x):
     x = self.cns1(x)
@@ -144,6 +167,21 @@ class Yolov5(nn.Module):
 
 
 if __name__ == '__main__':
+  yolov5Params = {
+    'medium': (0.67, 0.75),
+    'large': (1.00, 1.00),
+    'xlarge': (1.33, 1.25),
+    'small': (0.33, 0.50),
+    'nano': (0.33, 0.25)
+  }
+
   device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-  model = Yolov5().to(device)
+  model = Yolov5(*yolov5Params['nano']).to(device)
   summary(model, (3, 608, 608))
+
+  test_input = torch.randn(1, 3, 608, 608).to(device)
+  out1, out2, out3 = model(test_input)
+  print(f"输出:")
+  print(f"out1 (76): {out1.shape}")
+  print(f"out2 (38): {out2.shape}")
+  print(f"out3 (19): {out3.shape}")
